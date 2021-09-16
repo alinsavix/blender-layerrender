@@ -113,13 +113,18 @@ def enable_gpus(device_type='CUDA'):
     return activated_gpus
 
 
-def set_cycles_renderer(scene: bpy.types.Scene):
+def set_renderer_cycles(scene: bpy.types.Scene, compute="CUDA",
+    num_samples: int = 16):
     scene.render.engine = 'CYCLES'
-    enable_gpus('CUDA')
+    enable_gpus(compute)
 
     scene.cycles.feature_set = 'EXPERIMENTAL'
     scene.cycles.tile_order = 'CENTER'
+    scene.cycles.samples = num_samples
 
+
+def set_renderer_eevee(scene: bpy.types.Scene):
+    scene.render.engine = 'BLENDER_EEVEE'
 
 
 def render(args, outfile):
@@ -186,6 +191,17 @@ def render(args, outfile):
 class NegateAction(argparse.Action):
     def __call__(self, parser, ns, values, option):
         setattr(ns, self.dest, option[2:4] != 'no')
+
+
+class Validator(object):
+    def __init__(self, pattern):
+        self._pattern = re.compile(pattern)
+
+    def __call__(self, value):
+        if not self._pattern.match(value):
+            raise argparse.ArgumentTypeError(
+                "Argument has to match '{}'".format(self._pattern.pattern))
+        return value
 
 
 def valid_file(f: str) -> str:
@@ -274,7 +290,37 @@ def parse_arguments(argv):
         action='store',
         default=0,
 
-        help="samples to use (0 for blendfile amount)"
+        help="samples to use (0 for blendfile amount)",
+    )
+
+    parser.add_argument(
+        "--render-scale",
+        type=int,
+        action='store',
+        default=100,
+
+        help="percent render resolution to use",
+    )
+
+    parser.add_argument(
+        "--resolution",
+        # type=str,
+        type=Validator(r"^\d+x\d+$"),
+        action='store',
+        # default="1920x1080",
+        default=None,
+
+        help="resolution to render at",
+    )
+
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        action='store',
+        default="output.png",
+
+        help="output filename",
     )
 
     # parser.add_argument(
@@ -373,9 +419,29 @@ def main(argv: List[str]) -> int:
         log.error(f"requested scene '{args.scene}' does not exist in blendfile")
         return 1
 
-    bpy.context.window.scene = bpy.data.scenes[args.scene]
+    scene = bpy.context.window.scene = bpy.data.scenes[args.scene]
 
-    outfile = "output.png"
+    if args.renderer == "cycles":
+        set_cycles_renderer(scene=scene, compute=args.compute_type)
+    elif args.renderer == "eevee":
+        set_renderer_eevee(scene=scene)
+    else:
+        log.error(f"unknown renderer '{args.renderer}' requested")
+
+    if args.resolution:
+        x, y = args.resolution.split("x")
+        scene.render.resolution_x = x
+        scene.render.resolution_y = y
+
+    if args.render_scale:
+        scene.render.resolution_percentage = args.render_scale
+
+    # FIXME: this gives bad context? Why?
+    # bpy.ops.render.autotilesize_set()
+    # tsize = f"{bpy.context.scene.render.tile_x},{bpy.context.scene.render.tile_y}"
+
+    scene.render.filepath = os.path.realpath(args.output)
+    bpy.ops.render.render(animation=False, write_still=True, use_viewport=False)
     return 0
 
 
