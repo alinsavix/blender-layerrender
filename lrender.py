@@ -69,7 +69,54 @@ if bpy.context is None:
 # actual non-boootstrap code
 #
 
+# replace tokens in a file path with, well, replacements. For the moment,
+# blender should be configured and ready to go to render, before calling
+# this.
 #
+# ? How much should we accept as arguments, and how much from blender direct?
+def token_replace(outpath: str) -> str:
+    tokens = {
+        "$Scene": bpy.context.scene.name,
+        # "$File": os.path.basename(bpy.data.filepath).split(".")[0],
+        "$ViewLayer": bpy.context.view_layer.name,
+        "$Camera": "NoCamera" if bpy.context.scene.camera == None else bpy.context.scene.camera.name,
+    }
+
+    # renpath = bpy.context.scene.render.filepath
+    #
+    # compositor nodes
+    # nodeDict = []
+    #
+    # if bpy.context.scene.use_nodes:
+    #     for node in bpy.context.scene.node_tree.nodes:
+    #         if node.type == "OUTPUT_FILE":
+    #             nodeDict.append([node, node.base_path])
+    #             node.base_path = node.base_path.replace("$Scene", tokens["$Scene"]).replace(
+    #                 "$File", tokens["$File"]).replace("$ViewLayer", tokens["$ViewLayer"]).replace("$Camera", tokens["$Camera"])
+
+    # FIXME: There must be a better way to do this kind of replacement ... right?
+    res = outpath.replace("$Scene", tokens["$Scene"]).replace("$ViewLayer", tokens["$ViewLayer"]).replace("$Camera", tokens["$Camera"])
+
+    return res
+
+def report_prerender(args):
+    scene = bpy.context.scene
+    print(f"""
+    === Starting Render ===
+    blender file:   {args.file}
+    output path:    {scene.render.filepath}
+    output format:  {scene.render.image_settings.file_format}
+
+    scene:   {scene.name}
+    layer:   {bpy.context.view_layer.name}
+    camera:  {scene.camera.name}
+    stamp:   {scene.render.use_stamp}
+    res:     {scene.render.resolution_x}x{scene.render.resolution_y} @ {scene.render.resolution_percentage}%
+    engine:  {scene.render.engine}
+    denoise: {scene.cycles.use_denoising}
+    """)
+
+
 # basic blender prep
 def init_blender() -> None:
     # bpy.context.preferences.view.show_splash = False
@@ -323,6 +370,34 @@ def parse_arguments(argv):
         help="output filename",
     )
 
+    parser.add_argument(
+        "--stamp-metadata",
+        "--stamp",
+        "--no-stamp-metadata",
+        "--no-stamp",
+        dest="stamp_metadata",
+        default=None,
+        action=NegateAction,
+        nargs=0,
+    )
+
+    parser.add_argument(
+        "--denoise",
+        "--no-denoise",
+        dest="denoise",
+        default=None,
+        action=NegateAction,
+        nargs=0,
+    )
+
+    parser.add_argument(
+        "--no-render",
+        action='store_true',
+        default=True,
+
+        help="don't actually render",
+    )
+
     # parser.add_argument(
     #     "-s",
     #     "--scene",
@@ -436,12 +511,26 @@ def main(argv: List[str]) -> int:
     if args.render_scale:
         scene.render.resolution_percentage = args.render_scale
 
+    if args.stamp_metadata is not None:
+        bpy.context.scene.render.use_stamp = args.stamp_metadata
+
+    if args.denoise is not None:
+        scene.cycles.denoiser = 'OPENIMAGEDENOISE'
+        scene.cycles.use_denoising = args.denoise
+
     # FIXME: this gives bad context? Why?
     # bpy.ops.render.autotilesize_set()
     # tsize = f"{bpy.context.scene.render.tile_x},{bpy.context.scene.render.tile_y}"
 
-    scene.render.filepath = os.path.realpath(args.output)
-    bpy.ops.render.render(animation=False, write_still=True, use_viewport=False)
+    scene.render.filepath = os.path.realpath(token_replace(args.output))
+
+    report_prerender(args)
+
+    if args.no_render:
+        log.warning("--no-render specified, skipping render")
+    else:
+        bpy.ops.render.render(animation=False, write_still=True, use_viewport=False)
+
     return 0
 
 
