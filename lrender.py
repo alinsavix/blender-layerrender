@@ -99,6 +99,23 @@ def token_replace(outpath: str) -> str:
 
     return res
 
+r_names = {
+    "BLENDER_EEVEE": "Eevee",
+    "CYCLES": "Cycles",
+    "default": "Unknown",
+}
+
+def rn(name: str) -> str:
+    return r_names[name] if name in r_names else r_names["default"]
+
+def enabled_layers() -> str:
+    en = []
+    for layer in bpy.context.scene.view_layers:
+        if layer.use:
+            en.append(layer.name)
+
+    return en
+
 def report_prerender(args):
     scene = bpy.context.scene
     print(f"""
@@ -108,11 +125,11 @@ def report_prerender(args):
     output format:  {scene.render.image_settings.file_format}
 
     scene:   {scene.name}
-    layer:   {bpy.context.view_layer.name}
+    layers:  {",".join(enabled_layers())}
     camera:  {scene.camera.name}
     stamp:   {scene.render.use_stamp}
     res:     {scene.render.resolution_x}x{scene.render.resolution_y} @ {scene.render.resolution_percentage}%
-    engine:  {scene.render.engine}
+    engine:  {rn(scene.render.engine)}
     denoise: {scene.cycles.use_denoising}
     """)
 
@@ -393,7 +410,7 @@ def parse_arguments(argv):
     parser.add_argument(
         "--no-render",
         action='store_true',
-        default=True,
+        default=False,
 
         help="don't actually render",
     )
@@ -517,6 +534,9 @@ def main(argv: List[str]) -> int:
     if args.denoise is not None:
         scene.cycles.denoiser = 'OPENIMAGEDENOISE'
         scene.cycles.use_denoising = args.denoise
+
+    for layer in scene.view_layers:
+        layer.use = (layer.name in args.layer)
 
     # FIXME: this gives bad context? Why?
     # bpy.ops.render.autotilesize_set()
